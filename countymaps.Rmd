@@ -1,0 +1,177 @@
+---
+title: "America's blindspot: The role of unconscious racial bias in the educational achievement gap"
+author: "Tobias Britton"
+output:
+  html_document:
+    toc: true
+    toc_depth: 1
+    toc_float: false
+    theme: cosmo
+    highlight: null
+    lof: true
+   
+---
+
+# Introduction
+
+“Education is the most powerful weapon which you can use to change the world.” -Nelson Mandela
+
+A powerful quote and sentiment that resonates with educators fighting for equity across the globe. But what happens when access to education and educational outcomes are not distributed equally throughout a population?
+
+In this report, I seek to explore the relationship between racial prejudice and academic achievement gaps across the US. I use scores from the Implicit Association Test (IAT) to the measure weighted mean implicit racial bias at the county level, and data from the Stanford Education Data Archive (SEDA) to examine the weighted mean gap in test score performance between black and white students at the county level. 
+
+# Background
+
+In the United States systemic racial inequality persists between black and white citizens in areas ranging from access to health care to incarceration rates. Sadly, public education is no exception.
+
+While significant efforts are made each year to target what is widely referred to as the “achievement gap”- a gap in average performance on standardized test scores between students of different backgrounds- it persists in the majority of school districts across the United States. 
+
+There are a host of reasons why this is true, including income inequality between white families and families of color, a lack of culturally responsive pedagogy, and other broad and deeply rooted systemic injustices (Stanford Center for Education Policy Analysis, 2020).
+
+Implicit or unconscious bias is often cited as one factor responsible for “invisible” injustices experienced by students of color in the classroom. For example, we know that black male students are subjected to punitive practices disproportionately more than their white peers for exhibiting the exact same disruptive behavior (Gordon, 2018). 
+
+But, how do you measure implicit racial prejudice? Is it possible to examine a bias you yourself are not aware of? A group of cognitive scientists developed a tool in efforts to do just that. The Implicit Association Test (IAT) was developed to examine an individual’s association between positive and negative attributes and different groups, it measures response time pairing a category of individuals (i.e. white people) with words (i.e. beautiful or stinky) (Greenwald & Banaji, 1995). Since it's creation in the late 90's thousands of people from all over the US have taken the IAT, enabling us to see how racial attitudes vary by location. 
+
+Join me in exploring these data. 
+
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+
+rm(list = ls())
+
+library(plotly)
+library(foreign)
+library(dplyr)
+library(usmap)
+library(ggplot2)
+library(sf)
+library(plotly)
+library(tidyverse)
+library(RColorBrewer)
+
+
+setwd("~/Documents/Making Data Count/Final_S054")
+s054_data <- read.csv('merged.csv')
+
+state_plot <- s054_data %>% group_by(state, state_name) %>% summarize(mean_explicit = (mean(warmth_white, na.rm = TRUE) - mean(warmth_black, na.rm = TRUE)), mean_iat = mean(iat_score, na.rm = TRUE), gap_whiteblack = mean(mn_wbg, na.rm = TRUE))
+
+county_plots <- s054_data %>% group_by(county, state, fips_trial) %>% summarize(mean_explicit = (weighted.mean(warmth_white, na.rm = TRUE) - weighted.mean(warmth_black, na.rm = TRUE)), mean_iat = weighted.mean(iat_score, na.rm = TRUE), gap_whiteblack = weighted.mean(mn_wbg, na.rm = TRUE))
+
+
+g <- list(
+  scope = 'usa',
+  projection = list(type = 'albers usa'),
+  lakecolor = toRGB('white')
+)
+
+```
+
+# Does a pro-white implicit racial bias exist within the United States?
+
+```{r iat map1, echo=FALSE, warning=FALSE, out.width = '110%'}
+
+url <- 'https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json'
+counties <- rjson::fromJSON(file=url)
+url2<- "https://raw.githubusercontent.com/plotly/datasets/master/fips-unemp-16.csv"
+df <- read.csv(url2, colClasses=c(fips="character"))
+
+county_plots <- rename(county_plots, fips = fips_trial)
+merged_county <- left_join(df, county_plots, by = 'fips')
+
+ 
+#mean iat score
+fig1 <- plot_ly() %>% add_trace(
+    type="choroplethmapbox",
+    geojson=counties,
+    locations=merged_county$fips,
+    z=merged_county$mean_iat,
+    colorscale="Blues",
+    marker=list(line=list(
+      width=0),
+      opacity=0.5), zmin= -0.4, zmax= 0.4) %>% layout(
+    mapbox=list(
+      style="carto-positron",
+      zoom =3,
+      center=list(lon= -95.71, lat=37.09))) %>% colorbar(title = 'Racial bias score')
+
+fig1
+
+```
+
+### Yes, on average Americans in most counties across the US display a pro-white implicit bias.
+
+#### This map displays average implicit racial attitudes as measured by the Implicit Association Test (IAT) towards white versus black people in different counties (labeled using FIPS codes) accross the US. A negative score indicates a pro-black bias, a positive score indicates a pro-white bias. A score of 0 represents no bias towards either race. 
+
+
+
+
+
+
+
+# Is there an academic achievement gap between black and white students in the United States?
+
+```{r seda gap map2, echo=FALSE, warning=FALSE, out.width = '110%'}
+#mean academic gap
+fig2 <- plot_ly() %>% add_trace(
+    type="choroplethmapbox",
+    geojson=counties,
+    locations=merged_county$fips,
+    z=merged_county$gap_whiteblack,
+    colorscale="Greens",
+    marker=list(line=list(
+      width=0),
+      opacity=0.5), zmin= 0, zmax= 1) %>% layout(
+    mapbox=list(
+      style="carto-positron",
+      zoom =3,
+      center=list(lon= -95.71, lat=37.09))) %>% colorbar(title = 'Academic achievement gap')
+
+fig2
+
+```
+
+### Yes, on average white students across most counties in the US achieve higher standardized test scores compared to black students.
+
+#### This map displays the average black-white student achievement gap as measured by the Stanford Education Data Archive (SEDA) in counties (labeled using FIPS codes) across the US. The estimate uses district level National Assessment of Educational Progress (NAEP) performance and demographic information to develop gap estimates. The score displayed is the estimated average grade-level gap in performance between black-white students. A negative score suggests that on average black students achieve higher scores on standardized tests, a positive score suggests that on average white students achieve higher scores on standardized tests, a score of 0 indicates no difference in average performance between black and white students.
+
+
+
+# Exploring the relationship between implicit bias and the achievement gap
+```{r scatters, echo=FALSE, warning=FALSE, message=FALSE}
+
+fig4 <- ggplot(state_plot, aes(x = mean_iat, y = gap_whiteblack), show.legend = FALSE) + geom_point(shape = 1, aes(color = state_name)) + geom_smooth(method=lm, se=FALSE) + labs(x = 'Mean IAT score', y = 'Mean black-white academic achievment gap') + theme(legend.position = "none") +  scale_y_continuous(limits = c(0.4, 0.8)) 
+
+
+ggplotly(fig4)
+
+#fig3 <- plot_ly(state_plot, type = 'scatter', x = ~mean_iat, y = ~gap_whiteblack, color = ~state_name, colorscale = 'Portland', showlegend = FALSE, text = ~paste('<b>IAT Score:', mean_iat, '<b>Achievement Gap:', gap_whiteblack, sep = "<br>")) %>% add_trace(x = ~mean_iat, y = ~gap_whiteblack, mode = "lines") %>% layout(xaxis = list(title = 'Mean IAT score'), yaxis = list(title = 'Mean Black-White academic achievment gap', range = c(0.4, 0.8)), title = list(text = '<b>The relationship between implicit racial bias and the academic achievement gap in the United States'))
+
+#fig3
+
+
+#round(cor(state_plot[c('mean_iat', 'gap_whiteblack')], use = 'pairwise'), 2)
+#mod1 <- lm(mean_iat ~ gap_whiteblack, state_plot)
+
+#summary(mod1)
+
+```
+
+#### When we examine the relationship between average state level implicit bias and academic achievement gaps, we find a correlation of -0.42, suggesting that on a national level a negative relationship exists between implicit bias and the academic achievement gap. These results are unexpected, however provide us with no meaningful information about why this negative trend exists. Instead, the data invites more questions, such as: Is implicit bias (as measured by the IAT) and the black-white academic achievement gap related in a meaningful way within individual schools?  
+
+
+
+
+
+
+
+#### References:
+Greenwald, Anthony G., and Mahzarin R. Banaji. 1995. Implicit social cognition: Attitudes, self-esteem, and stereotypes. Psychological Review 102.1: 4–27.
+
+Gordon, N. (2018, December 18). Disproportionality in student discipline: Connecting policy to research. Retrieved from https://www.brookings.edu/research/disproportionality-in-student-discipline-connecting-policy-to-research/
+
+Reardon, S. F., Ho, A. D., Shear, B. R., Fahle, E. M., Kalogrides, D., Jang, H., Chavez, B., Buontempo, J., & DiSalvo, R. (2019). Stanford Education Data Archive (Version 3.0). http://purl.stanford.edu/db586ns4974
+
+Racial and Ethnic Achievement Gaps. (n.d.). Retrieved from https://cepa.stanford.edu/educational-opportunity-monitoring-project/achievement-gaps/race/
+
+
+
