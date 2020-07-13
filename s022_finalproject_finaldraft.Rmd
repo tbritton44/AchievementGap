@@ -1,0 +1,307 @@
+---
+title: "S022 Final Project: Examining the relationship between racial bias and white-black student academic achievement gap at the county level"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: yeti
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+
+rm(list = ls())
+library(flexdashboard) # used to create a flexdashboard; this is a great way to create data visualizations using R, especially interactive visualizations
+library(ggplot2) # need ggplot2 for our ggplots
+library(viridis) # for coloring maps
+library(ggmap) # for plotting maps using shape files
+library(tidyverse) #for...most things
+library(shiny) #to create the interactive flexdashboard
+library(tidyr) #to use the pivot_wider() function
+library(dplyr) #to use back piping
+library(magrittr) #to use forward piping
+library(plotly) #to build interactive figures
+library(emojifont) #tool to build an epic catterplot
+library(boot) #to conduct a bootstrap analysis
+
+setwd("~/Documents/DataScience_forEd/FinalProject")
+s054_data <- read.csv('merged.csv') #read in the dataset i will be using
+
+
+#create state level summmaries filtering out the possibility of any non representative data by making sure each mean has at least 5 data points
+state_plot <- s054_data %>% group_by(state, state_name) %>% filter(n() > 5) %>% 
+  dplyr::summarize(mean_explicit = (mean(warmth_white, na.rm = TRUE) - mean(warmth_black, na.rm = TRUE)), 
+            mean_iat = mean(iat_score, na.rm = TRUE), 
+            gap_whiteblack = mean(mn_wbg, na.rm = TRUE)) 
+
+#create county level summaries filtering out the possibility of any non representative data by making sure each mean has at least 5 data points, sorting by county, state, and grade level 
+county <- s054_data %>% group_by(county,fips_trial, grade) %>% filter(n() > 5) %>% dplyr::summarize(gap_whiteblack = mean(mn_wbg, na.rm = TRUE)) 
+
+#create similar dataset that does not include grade level, for explicit bias
+county_plots2 <- s054_data %>% group_by(county, fips_trial, state) %>% filter(n() > 5) %>% dplyr::summarize(mean_explicit = (mean(warmth_white, na.rm = TRUE) - mean(warmth_black, na.rm = TRUE)))
+
+#create similar dataset that does not include grade level, for implicit bias
+county_plots <- s054_data %>% group_by(county, fips_trial, state) %>% filter(n() > 5) %>% dplyr::summarize(mean_iat = mean(iat_score, na.rm = TRUE)) 
+
+#pull in packages necessary to generate county level maps
+url <- 'https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json'
+counties <- rjson::fromJSON(file=url) 
+url2<- "https://raw.githubusercontent.com/plotly/datasets/master/fips-unemp-16.csv"
+df <- read.csv(url2, colClasses=c(fips="character"))
+
+#the county dataset i have created with the FIPS info required for the plot
+county <- rename(county, fips = fips_trial)
+merged_county <- left_join(df, county, by = 'fips') 
+
+#transform datasets to have more columns making it easier to create inputs later on
+data_wide_gradelevel <- county %>% pivot_wider(id_cols = c('fips', 'county'), names_from = grade, names_prefix = 'grade_', values_from = gap_whiteblack) 
+
+
+#same process again for other datasets
+county_plots <- rename(county_plots, fips = fips_trial)
+merged_nograde <- left_join(df, county_plots, by = 'fips') 
+
+data_wide_statelevel <- merged_nograde %>% pivot_wider(id_cols = c('county', 'fips'), names_from = state, names_prefix = 'iat_', values_from = mean_iat)
+
+
+county_plots2 <- rename(county_plots2, fips = fips_trial)
+merged_nograde2 <- left_join(df, county_plots2, by = 'fips')
+
+data_wide_statelevel2 <- merged_nograde2 %>% pivot_wider(id_cols = c('county', 'fips'), names_from = state, names_prefix = 'explicit_', values_from = mean_explicit)
+
+```
+
+Map of Explicit Bias
+=====================================
+
+Column {.sidebar, width = 1}
+-----------------------------------------------------------------------
+##THIS IS HERE TO PUSH DOWN THE REST OF THE TEXT 
+
+### Explicit racial bias
+
+This map displays average explicit racial attitudes as measured by a survey distributed by Project Implicit, the survey asks respondents to rate how warmly they feel towards white versus black people in different counties (labeled using FIPS codes) accross the US. A negative score indicates greater reported feelings of warmth towards black people, a positive score indicates greater reported feelings of warmth towards white people. A score of 0 represents no bias towards either race. 
+
+```{r}
+
+#generate input bar that allows the user to scroll and select the state they would like to view
+
+selectInput("state2", label = 'State:', choices = c('AK', 'AL', 'AR', 'AZ', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'), selected = 'MA')
+
+```
+
+Column
+-----------------------------------------------------------------------
+
+### Map of explicit racial bias scores 
+
+```{r, out.width = '80%'}
+
+#generate county level map of mean survey scores of warmth white - warmth black
+renderPlotly({
+  data_wide_statelevel2$estimate <- data_wide_statelevel2[[paste0('explicit_', input$state2)]]
+   plot_ly() %>% add_trace(
+    type="choroplethmapbox",
+    geojson=counties,
+    locations=data_wide_statelevel2$fips,
+    z=data_wide_statelevel2$estimate,
+    colorscale="Blues",
+    marker=list(line=list(
+      width=0),
+      opacity=0.5)) %>% layout(
+    mapbox=list(
+      style="carto-positron",
+      zoom =3,
+      center=list(lon= -95.71, lat=37.09))) %>% colorbar(title = 'Black-white racial explicit bias')
+   })
+
+
+
+```
+
+
+
+Map of Implicit Bias
+=====================================
+
+Column {.sidebar, width = 1}
+-----------------------------------------------------------------------
+##THIS IS HERE TO PUSH DOWN THE REST OF THE TEXT 
+
+### Implicit racial bias
+
+This map displays average implicit racial attitudes as measured by the Implicit Association Test (IAT) towards white versus black people in different counties (labeled using FIPS codes) accross the US. A negative score indicates a pro-black bias, a positive score indicates a pro-white bias. A score of 0 represents no bias towards either race. 
+
+```{r}
+
+#generate input bar that allows the user to scroll and select the state they would like to view
+
+selectInput("state", label = 'State:', choices = c('AK', 'AL', 'AR', 'AZ', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'), selected = 'MA')
+
+```
+
+Column
+-----------------------------------------------------------------------
+
+### Map of implicit racial bias scores 
+
+```{r, out.width = '80%'}
+
+#generate county level map of mean IAT scores
+
+renderPlotly({
+  data_wide_statelevel$estimate <- data_wide_statelevel[[paste0('iat_', input$state)]]
+   plot_ly() %>% add_trace(
+    type="choroplethmapbox",
+    geojson=counties,
+    locations=data_wide_statelevel$fips,
+    z=data_wide_statelevel$estimate,
+    colorscale="Greens",
+    marker=list(line=list(
+      width=0),
+      opacity=0.5)) %>% layout(
+    mapbox=list(
+      style="carto-positron",
+      zoom =3,
+      center=list(lon= -95.71, lat=37.09))) %>% colorbar(title = 'Black-white racial implicit bias')})
+
+
+```
+
+Map of Academic Achievement Gap
+=====================================
+
+Column {.sidebar, width = 1}
+-----------------------------------------------------------------------
+##THIS IS HERE TO PUSH DOWN THE REST OF THE TEXT 
+
+### Grade level academic achievement gap between black and white students
+
+This map displays the average black-white student achievement gap as measured by the Stanford Education Data Archive (SEDA) in counties (labeled using FIPS codes) across the US. The estimate uses district level National Assessment of Educational Progress (NAEP) performance and demographic information to develop gap estimates. The score displayed is the estimated average grade-level gap in performance between black-white students. A negative score suggests that on average black students achieve higher scores on standardized tests, a positive score suggests that on average white students achieve higher scores on standardized tests, a score of 0 indicates no difference in average performance between black and white students.
+
+```{r}
+
+selectInput("map_type_1", label = "Grade level:",
+            choices = c('3', '4', '5', '6', '7', '8'), selected = '5')
+
+
+```
+
+Column
+-----------------------------------------------------------------------
+
+### Map of black-white academic achievement gap by grade level
+
+```{r, out.width = '80%'}
+renderPlotly({
+  data_wide_gradelevel$estimate <- data_wide_gradelevel[[paste0('grade_', as.numeric(input$map_type_1))]]
+plot_ly() %>% add_trace(
+    type="choroplethmapbox",
+    geojson=counties,
+    locations=data_wide_gradelevel$fips,
+    z=data_wide_gradelevel$estimate,
+    colorscale="Portland",
+    marker=list(line=list(
+      width=0),
+      opacity=0.5), zmin= min(data_wide_gradelevel$estimate, na.rm = TRUE), zmax= max(data_wide_gradelevel$estimate, na.rm = TRUE)) %>% layout(
+    mapbox=list(
+      style="carto-positron",
+      zoom =3,
+      center=list(lon= -95.71, lat=37.09))) %>% colorbar(title = 'Black-white academic achievement gap')
+})
+
+```
+
+
+Some Catterplots (No, that is not a typo.)
+=====================================
+
+Column {.sidebar, width = 1}
+-----------------------------------------------------------------------
+
+##THIS IS HERE TO PUSH DOWN THE REST OF THE TEXT 
+
+### A closer look at the relationship between implicit bias and the black-white achievement gap at the state level 
+
+Using bootstrapping regression models I estimated confidence intervals and significance levels of the r-squared values. The r-squared value for mean_explicit ~ gap_whiteblack is 0.34 with a CI of (0.0047, 0.89). The r-squared value for mean_iat ~ gap_whiteblack is 0.17 with a CI of (0.0030,  0.6382). Although both of these values appear to be signficant, they explain very little about this relationship accounting for only 34% and 17% of the variance in this model respectively. Note that there is a moderate negative association between the average implicit and explicit racial bias and the white-black academic achievment gap at the state level. We find correlation coefficients, -0.58 (explicit) and -0.42 (implicit), suggesting a moderate negative relationship between bias and academic acheivement. Such that in areas where bias is high the achievement gap is low. These are unexpected and surprising result, particularly given the body of research that suggests that bias can have negative consequences on student experience and outcomes. Some speculations about these findings include:
+
+1. Selection bias: It is possible that certain types of people are more likely than others to take the IAT. Since even measures of explicit bias were collected by IAT survey respondents, it is possible that both explcit and implicit measures of bias presented are skewed by selection bias. For example, maybe people who become intrested in Project Implicit and opt to take the IAT differ in some meaningful way from the wider population. Perhaps they are more interested in implicit racism or more aware of it's consequences, they may be more educated, etc. It may be that the relationship we are seeing is between some unique aspect of the population taking the IAT as opposed to the bias scores themselves.
+
+2. Perhaps we are not really looking at the "achievement gap", but rather systemic racism. It is possible that high achievement gap counties simply have a substantial proportion of black students or at the very least have a greater mix of black and white students. In this instance, it would make sense that levels of racial or pro-white bias are are lower. However, due to historic and continuous systems of oppression and inequity these schools have fewer resources resulting in a greater gap.  
+
+It is important to note that these are speculations, these findings are interesting however in order to further unpack them additional research is required. In particular it might be interesting to examine other characteristics of high achievement gap, low bias or low achievement gap, high bias counties and build a machine learning model that helps us better determine key predictors of bias and achievement gap. 
+
+
+Row {. tabset}
+-----------------------------------------------------------------------
+
+### Chart 1
+
+```{r}
+
+#here i create catterplot #1 where we look at the relationship between explicit bias and acheivement gap
+p <- ggplot(state_plot, aes(x = mean_explicit, y = gap_whiteblack, label = emoji('smiley_cat')), show.legend = FALSE) + geom_text(family = "EmojiOne") + geom_point(shape = 1, aes(color = state_name)) + geom_smooth(method=lm, se=FALSE) + labs(x = 'Explicit bias', y = 'Mean black-white academic achievment gap', title = 'The relationship between state level <br> explicit bias and academic acheivement gaps') + theme(legend.position = "none") + scale_y_continuous(limits = c(-0.5, 1)) 
+
+ggplotly(p)
+
+```
+
+```{r eval=FALSE, include=FALSE}
+
+#i generate a subset of the data that discards all nas so that I don't have any funkiness with my bootstrapping
+sub <- na.omit(state_plot)
+
+#I run a bootstrap analysis extracting R2 and CI of mean_explicit ~ gap_whiteblack 
+
+my_stat <- function(formula = mean_explicit ~ gap_whiteblack, data = sub, indices){  
+  data_boot <- data[indices, ]
+  mod <- lm(formula, data = data_boot) 
+  return(summary(mod)$r.squared) 
+}
+
+my_stat(indices = 1:nrow(sub)) 
+
+my_boot <- boot(data = sub, statistic = my_stat1, R = 10000, formula = 'mean_explicit ~ gap_whiteblack')
+my_boot
+plot(my_boot)
+boot.ci(my_boot)
+
+
+cor(sub$mean_explicit, sub$gap_whiteblack, method = "pearson")
+
+```
+
+Row {. tabset}
+-----------------------------------------------------------------------
+
+### Chart 2
+```{r}
+
+#here i create catterplot #2 where we look at the relationship between explicit bias and acheivement gap
+p1 <- ggplot(state_plot, aes(x = mean_iat, y = gap_whiteblack, label = emoji('smiley_cat')), show.legend = FALSE) + geom_text(family = "EmojiOne") + geom_point(shape = 1, aes(color = state_name)) + geom_smooth(method=lm, se=FALSE) + labs(x = 'Implicit Bias', y = '', title = 'The relationship between state level <br> implicit bias and academic acheivement gaps') + theme(legend.position = "none") + scale_y_continuous(limits = c(-0.5, 1)) 
+
+ggplotly(p1)
+
+
+```
+
+```{r eval=FALSE, include=FALSE}
+
+#I run another bootstrap analysis extracting R2 and CI of mean_iat ~ gap_whiteblack
+my_stat1 <- function(formula = mean_iat ~ gap_whiteblack, data = sub, indices){  
+  data_boot <- data[indices, ]
+  mod <- lm(formula, data = data_boot) 
+  return(summary(mod)$r.squared) 
+}
+
+my_stat1(indices = 1:nrow(sub)) 
+
+my_boot1 <- boot(data = sub, statistic = my_stat1, R = 10000, formula = 'mean_iat ~ gap_whiteblack')
+my_boot1
+plot(my_boot1)
+boot.ci(my_boot1)
+
+cor(sub$mean_iat, sub$gap_whiteblack, method = "pearson")
+
+```
+
